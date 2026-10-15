@@ -1,0 +1,10 @@
+# the sample's database. 5433, never 5432 (wasichai ADR-033)
+services:
+  postgis:
+    image: postgis/postgis:18-3.6
+    environment:
+      POSTGRES_DB: wasichai
+      POSTGRES_USER: wasichai
+      POSTGRES_PASSWORD: wasichai
+    ports:
+      - "5433:5432"

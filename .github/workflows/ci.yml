@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      wasichai-ref:
+        description: wasichai branch or tag to build against
+        default: main
+
+# the same smoke against the jar and the native image (wasichai ADR-068)
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [jvm, native]
+    runs-on: ubuntu-latest
+    services:
+      postgis:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_DB: wasichai
+          POSTGRES_USER: wasichai
+          POSTGRES_PASSWORD: wasichai
+        ports:
+          - 5433:5432
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    env:
+      WASICHAI_DB_PORT: "5433"
+      WASICHAI_JWT_SECRET: ci-only-secret-that-is-at-least-32-bytes-long
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: full-sample
+      # the composite build reads wasichai from the sibling directory
+      - uses: actions/checkout@v4
+        with:
+          repository: wasichai/wasichai
+          ref: ${{ inputs.wasichai-ref || 'main' }}
+          path: wasichai
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: "25"
+          distribution: graalvm-community
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build
+        working-directory: full-sample
+        run: |
+          if [ "${{ matrix.mode }}" = native ]; then ./gradlew :server:nativeCompile; else ./gradlew :server:bootJar; fi
+      - name: Smoke
+        working-directory: full-sample
+        run: |
+          if [ "${{ matrix.mode }}" = native ]; then
+            server/build/native/nativeCompile/full-sample > app.log 2>&1 &
+          else
+            java -jar server/build/libs/server.jar > app.log 2>&1 &
+          fi
+          e2e/smoke.sh || { tail -200 app.log; exit 1; }

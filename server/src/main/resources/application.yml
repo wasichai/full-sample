@@ -1,0 +1,10 @@
+server:
+  port: ${PORT:8090}
+
+wasichai:
+  security:
+    jwt:
+      secret: ${WASICHAI_JWT_SECRET}
+  # a native image fixes this at build time (ADR-068): the sample always seeds its admin
+  seed:
+    dev: true   # admin@wasichai.local / admin, development only
