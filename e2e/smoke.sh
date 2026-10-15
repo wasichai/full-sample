@@ -19,6 +19,8 @@ fail() {
 # call METHOD PATH EXPECTED_STATUS [JSON_BODY] -> body in $BODY_FILE
 call() {
     local method=$1 path=$2 expected=$3 body=${4:-}
+    # names are tenant-wide: every run gets its own (RUNID in a single-quoted body)
+    body=${body//RUNID/$RUN}
     local args=(-sS -o "$BODY_FILE" -w '%{http_code}' -X "$method" "$BASE_URL$path" -H 'Accept: application/json')
     [[ -n $TOKEN ]] && args+=(-H "Authorization: Bearer $TOKEN")
     [[ -n $body ]] && args+=(-H 'Content-Type: application/json' -d "$body")
@@ -57,7 +59,7 @@ call GET "/api/objects/$OBJ" 200
 
 # workflow
 call PUT "/api/objects/$OBJ/workflow" 200 '{
-  "name": "aprobacion", "label": "Aprobación", "enabled": true,
+  "name": "aprobacion_RUNID", "label": "Aprobación", "enabled": true,
   "definition": {
     "states": [
       {"name": "draft", "label": "Borrador", "type": "INITIAL"},
@@ -71,26 +73,26 @@ call GET "/api/objects/$OBJ/workflow" 200
 
 # automation: marks every new record, so a run reads its definition and writes its payload
 call POST "/api/objects/$OBJ/automations" 201 '{
-  "name": "marca", "label": "Marca", "enabled": true,
+  "name": "marca_RUNID", "label": "Marca", "enabled": true,
   "definition": {
     "trigger": {"type": "RECORD_CREATED"},
     "conditions": [{"field": "area", "operator": "GREATER_THAN", "value": "10"}],
     "actions": [{"type": "UPDATE_FIELD", "field": "revisado", "value": "{{codigo}} ok"}]
   }
 }'
-call GET "/api/objects/$OBJ/automations/marca" 200
+call GET "/api/objects/$OBJ/automations/marca_$RUN" 200
 
 # views, forms, pages
 call POST "/api/objects/$OBJ/views" 201 '{
-  "name": "grandes", "label": "Grandes",
+  "name": "grandes_RUNID", "label": "Grandes",
   "definition": {"columns": ["codigo", "area"], "filters": {}, "sort": {"field": "codigo", "direction": "ASC"}, "pageSize": 25}
 }'
-call GET "/api/objects/$OBJ/views/grandes" 200
+call GET "/api/objects/$OBJ/views/grandes_$RUN" 200
 call POST "/api/objects/$OBJ/forms" 201 '{
-  "name": "alta", "label": "Alta",
+  "name": "alta_RUNID", "label": "Alta",
   "definition": {"sections": [{"title": "Datos", "fields": ["codigo", "area"]}]}
 }'
-call GET "/api/objects/$OBJ/forms/alta" 200
+call GET "/api/objects/$OBJ/forms/alta_$RUN" 200
 call GET "/api/objects/$OBJ/pages/record-detail" 200
 PAGE=$(jq -c --arg name "${OBJ}-detalle" '{name: $name, label: .label, objectName: .objectName, kind: .kind,
   template: .template.name, definition: .definition}' "$BODY_FILE")
@@ -99,20 +101,20 @@ call GET "/api/pages/${OBJ}-detalle" 200
 
 # documents
 call POST "/api/objects/$OBJ/document-types" 201 "{
-  \"name\": \"oficio\", \"label\": \"Oficio\", \"prefix\": \"S${RUN: -6}\",
+  \"name\": \"oficio_$RUN\", \"label\": \"Oficio\", \"prefix\": \"S${RUN: -6}\",
   \"template\": {\"type\": \"doc\", \"content\": [{\"type\": \"paragraph\", \"content\": [
     {\"type\": \"text\", \"text\": \"Predio \"}, {\"type\": \"objectField\", \"attrs\": {\"field\": \"codigo\"}}]}]}
 }"
-call GET "/api/objects/$OBJ/document-types/oficio" 200
+call GET "/api/objects/$OBJ/document-types/oficio_$RUN" 200
 
 # notifications: a date rule
 call POST "/api/objects/$OBJ/notification-rules" 201 '{
-  "name": "por_vencer", "label": "Por vencer", "enabled": true, "field": "vigencia",
+  "name": "por_vencer_RUNID", "label": "Por vencer", "enabled": true, "field": "vigencia",
   "stages": [{"fromDays": -15, "kind": "WARNING"}], "untilDays": 3,
   "audience": [{"type": "ROLE", "value": "ADMIN"}],
   "title": "{{codigo}} vence el {{date}}", "body": "Quedan {{days}} días."
 }'
-call GET "/api/objects/$OBJ/notification-rules/por_vencer" 200
+call GET "/api/objects/$OBJ/notification-rules/por_vencer_$RUN" 200
 
 # records: geometry in, transition, document, file
 VIGENCIA=$(date -u -d '+5 days' +%F)
@@ -126,7 +128,7 @@ call GET "/api/objects/$OBJ/records/$ID" 200
 call GET "/api/gis/objects/$OBJ/features/$ID?geometry=lote" 200
 
 call POST "/api/objects/$OBJ/records/$ID/transitions/approve" 200
-call POST "/api/objects/$OBJ/records/$ID/documents/oficio" 201
+call POST "/api/objects/$OBJ/records/$ID/documents/oficio_$RUN" 201
 DOC=$(json .id)
 call GET "/api/documents/$DOC" 200
 
@@ -136,13 +138,13 @@ status=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -H "Authorization: Bearer $T
 echo "ok  POST /api/objects/$OBJ/records/$ID/files/acta"
 call GET "/api/objects/$OBJ/records/$ID/files/acta" 200
 
-# the automation ran (async: after the create commits)
+# the automation ran (async: after the create commits) and finished
 for _ in $(seq 1 30); do
-    call GET "/api/objects/$OBJ/automations/marca/runs?limit=5" 200 >/dev/null
-    [[ $(json 'length') -ge 1 ]] && break
+    call GET "/api/objects/$OBJ/automations/marca_$RUN/runs?limit=5" 200 >/dev/null
+    [[ $(json '[.[] | select(.status == "SUCCEEDED" or .status == "FAILED")] | length') -ge 1 ]] && break
     sleep 1
 done
-[[ $(json 'length') -ge 1 ]] || fail "automation never ran"
+[[ $(json '.[0].status') == SUCCEEDED ]] || fail "automation run did not succeed: $(json '.[0]')"
 call GET "/api/objects/$OBJ/records/$ID" 200
 [[ $(json .attributes.revisado) == "P-001 ok" ]] || fail "automation did not mark the record: $(json .attributes)"
 
