@@ -3,3 +3,5 @@ build/
 .kotlin/
 .idea/
 *.iml
+# the files module's local store (wasichai.files.store=local)
+wasichai-files/
