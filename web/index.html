@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Wasichai full sample</title>
+        <script>
+            // before the bundle: apply the stored theme so a dark user never sees a light flash (wasichai-ui core README)
+            try {
+                const schemes = { light: 'light', dark: 'dark' }
+                const system = { light: 'light', dark: 'dark' }
+                const stored = localStorage.getItem('wasichai.theme')
+                const dark = matchMedia('(prefers-color-scheme: dark)').matches
+                const theme = stored && Object.hasOwn(schemes, stored) ? stored : system[dark ? 'dark' : 'light']
+                document.documentElement.dataset.theme = theme
+                document.documentElement.style.colorScheme = schemes[theme]
+            } catch {}
+        </script>
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.tsx"></script>
+    </body>
+</html>

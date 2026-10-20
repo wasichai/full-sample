@@ -60,3 +60,24 @@ jobs:
             java -jar server/build/libs/server.jar > app.log 2>&1 &
           fi
           e2e/smoke.sh || { tail -200 app.log; exit 1; }
+
+  # the web builds against wasichai-ui next to it, as the server does against wasichai
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: full-sample
+      - uses: actions/checkout@v4
+        with:
+          repository: wasichai/wasichai-ui
+          path: wasichai-ui
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      - name: Build wasichai-ui
+        working-directory: wasichai-ui
+        run: yarn install --frozen-lockfile && yarn build
+      - name: Build the web
+        working-directory: full-sample/web
+        run: yarn install --frozen-lockfile && yarn build

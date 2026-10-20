@@ -5,3 +5,6 @@ build/
 *.iml
 # the files module's local store (wasichai.files.store=local)
 wasichai-files/
+# web
+node_modules/
+web/dist/
